@@ -479,13 +479,14 @@ class CGNetModule(nn.Module):
                 output2 = layer(output2)
 
         output2_cat = self.bn_prelu_3(torch.cat([output2_0, output2], 1))
-       
-        # classifier
-        classifier = self.classifier(output2_cat)
 
         # upsample segmentation map ---> the input image size
-        out = F.interpolate(classifier, input.size()[2:], mode='bilinear', align_corners = True)   #Upsample score map, factor=8
-        out = F.interpolate(classifier, input.size()[2:], mode='bilinear', align_corners = True)   #Upsample score map, factor=8
-        return out
+        output_up1 = F.interpolate(output2_cat, input.size()[2:], mode='bilinear', align_corners = True)   #Upsample score map, factor=8
+        output_up2 = F.interpolate(output_up1, input.size()[2:], mode='bilinear', align_corners = True)   #Upsample score map, factor=8
+        
+        # classifier
+        classifier = self.classifier(output_up2)
+
+        return classifier
   
    
