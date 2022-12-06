@@ -32,14 +32,8 @@
       "Tropical Cyclone",
       "Atmospheric River"
     ],
-<<<<<<< HEAD:config.json
-    "loss": "jaccard",
-    "weights": [0.355, 72.171, 5.875],
-    "description": "CGNet model with AdamW and default."
-=======
     "loss": "weighted_cross_entropy",
     "loss_weights": [0.355, 72.171, 5.875],
     "save_epochs": true,
     "description": "CGNet model with weighted cross-entropy loss."
->>>>>>> main:models/TMQ-WS850-VRT850-PSL-PRECT-.0001-wce/config.json
 }

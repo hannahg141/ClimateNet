@@ -8,13 +8,8 @@ import torch.nn.functional as F
 from climatenet.modules import *
 from climatenet.utils.data import ClimateDataset, ClimateDatasetLabeled
 from climatenet.utils.losses import jaccard_loss, dice_coefficient, cross_entropy_loss_pytorch, weighted_cross_entropy_loss
-<<<<<<< HEAD
 from climatenet.utils.metrics import get_cm, get_iou_perClass, get_dice_perClass
 from torch.optim import AdamW
-=======
-from climatenet.utils.metrics import get_cm, get_iou_perClass, get_dice_perClass, get_confusion_metrics
-from torch.optim import Adam
->>>>>>> main
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import numpy as np
