@@ -9,7 +9,7 @@ from climatenet.modules import *
 from climatenet.utils.data import ClimateDataset, ClimateDatasetLabeled
 from climatenet.utils.losses import jaccard_loss, dice_coefficient, cross_entropy_loss_pytorch, weighted_cross_entropy_loss
 from climatenet.utils.metrics import get_cm, get_iou_perClass, get_dice_perClass
-from torch.optim import Adam
+from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import numpy as np
@@ -60,9 +60,9 @@ class CGNet():
         else:
             raise ValueError('''You need to specify either a config or a model path.''')
 
-        self.optimizer = Adam(self.network.parameters(), lr=self.config.lr)        
+        self.optimizer = AdamW(self.network.parameters(), lr=self.config.lr)
         
-    def train(self, train_dataset: ClimateDatasetLabeled, val_dataset: ClimateDatasetLabeled):
+    def train(self, train_dataset: ClimateDatasetLabeled, val_dataset: ClimateDatasetLabeled=None):
         '''Train the network on the train dataset for the given amount of epochs, and validate it
         at each epoch on the validation dataset.'''
         self.network.train()
