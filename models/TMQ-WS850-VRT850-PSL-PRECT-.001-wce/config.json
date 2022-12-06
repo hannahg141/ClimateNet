@@ -22,6 +22,10 @@
         "PSL": {
             "mean": 100814.414,
             "std": 1461.2227
+        },
+        "PRECT": {
+            "mean": 2.94582e-08,
+            "std": 1.55088e-07
         }
     },
     "labels": [
@@ -33,7 +37,7 @@
     "description": "The basic CGNet model. You can use this config to train your own model, or load it with our trained weights."
 =======
     "loss": "weighted_cross_entropy",
-    "weights": [0.355, 72.171, 5.875],
+    "loss_weights": [0.355, 72.171, 5.875],
     "save_epochs": true,
     "description": "CGNet model with weighted cross-entropy loss."
 >>>>>>> main:models/TMQ-WS850-VRT850-PSL-.001-wce/config.json

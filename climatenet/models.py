@@ -8,12 +8,18 @@ import torch.nn.functional as F
 from climatenet.modules import *
 from climatenet.utils.data import ClimateDataset, ClimateDatasetLabeled
 from climatenet.utils.losses import jaccard_loss, dice_coefficient, cross_entropy_loss_pytorch, weighted_cross_entropy_loss
+<<<<<<< HEAD
 from climatenet.utils.metrics import get_cm, get_iou_perClass, get_dice_perClass
 from torch.optim import AdamW
+=======
+from climatenet.utils.metrics import get_cm, get_iou_perClass, get_dice_perClass, get_confusion_metrics
+from torch.optim import Adam
+>>>>>>> main
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import numpy as np
 import xarray as xr
+import pandas as pd
 from climatenet.utils.utils import Config
 from os import path
 import pathlib
@@ -61,27 +67,39 @@ class CGNet():
             raise ValueError('''You need to specify either a config or a model path.''')
 
         self.optimizer = AdamW(self.network.parameters(), lr=self.config.lr)
-        
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.1, patience=1, threshold=0.002, verbose=True)        
+
     def train(self, train_dataset: ClimateDatasetLabeled, val_dataset: ClimateDatasetLabeled=None):
         '''Train the network on the train dataset for the given amount of epochs, and validate it
         at each epoch on the validation dataset.'''
         self.network.train()
         
-        # Push model and data on GPU if available
+        # Initialize training history
+        history = pd.DataFrame(columns=['minibatch_loss', 'epoch_avg_loss', 'epoch_val_loss', 'learning_rate', 'evaluation_loss',\
+                                        'training_confusion_matrix', 'validation_confusion_matrix', 'evaluation_confusion_matrix',\
+                                        'train_ious', 'train_dices', 'train_precision', 'train_recall', 'train_specificity', 'train_sensitivity',\
+                                        'val_ious', 'val_dices', 'val_precision', 'val_recall', 'val_specificity', 'val_sensitivity',\
+                                        'test_ious', 'test_dices', 'test_precision', 'test_recall', 'test_specificity', 'test_sensitivity'])
+
+        # Push model to GPU if available
         device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-       
         self.network.to(device)
-        if hasattr(self, "config,weights"): self.config.weights = self.config.weights.to(device)
 
         collate = ClimateDatasetLabeled.collate
         loader = DataLoader(train_dataset, batch_size=self.config.train_batch_size, collate_fn=collate, num_workers=0, shuffle=True)
-        
+
+        # Prepare scheduler
+        best_val_loss = float("inf")
+        no_improvement_counter = 0
+
         # Loop over epochs
         for epoch in range(1, self.config.epochs+1):
 
             print(f'\n================ Training epoch #{epoch} ({device}) ================')
             epoch_loader = tqdm(loader, leave=True)
             train_aggregate_cm = np.zeros((3,3))
+            num_minibatches = len(loader)
+            epoch_loss = 0.
 
             for features, labels in epoch_loader:
         
@@ -107,40 +125,88 @@ class CGNet():
                 elif self.config.loss == "cross_entropy_loss_pytorch":
                     train_loss = cross_entropy_loss_pytorch(outputs, labels)
                 elif self.config.loss == "weighted_cross_entropy":
-                    train_loss = weighted_cross_entropy_loss(outputs, labels, self.config.weights)
+                    train_loss = weighted_cross_entropy_loss(outputs, labels)
                     
-                epoch_loader.set_description(f'Loss: {train_loss.item():.5f} ({self.config.loss}) ')
+                epoch_loader.set_description(f'Loss: {train_loss.item():.5f} ({self.config.loss}) | LR: {self.optimizer.param_groups[0]["lr"]}')
+                
+                epoch_loss += train_loss.item()
+                history = history.append({'minibatch_loss': train_loss.item()}, ignore_index=True)
+
                 train_loss.backward()
                 self.optimizer.step()
                 self.optimizer.zero_grad() 
 
-            # Training stats reporting
-            print(f'\nTraining loss: {train_loss.item():.5f} ({self.config.loss}) ')
+            # Compute and track training hisotry
+            epoch_loss /= num_minibatches
+            training_confusion_matrix = 100*train_aggregate_cm/np.sum(train_aggregate_cm)
             train_ious = get_iou_perClass(train_aggregate_cm)
-            print('Classes:   [    BG         TCs        ARs   ]')
-            print('IoUs:     ', train_ious, ' | Mean: ', train_ious.mean())
             train_dices = get_dice_perClass(train_aggregate_cm)
-            print('Dice:     ', train_dices, ' | Mean: ', train_dices.mean())
-            print(np.array_str(np.around(train_aggregate_cm/np.sum(train_aggregate_cm), decimals=3), precision=3))
+            t_precision, t_recall, t_specificity, t_sensitivity = get_confusion_metrics(train_aggregate_cm)
 
+            history = history.append({'epoch_avg_loss': epoch_loss, 'learning_rate': self.optimizer.param_groups[0]["lr"], \
+                                    'training_confusion_matrix': np.array(training_confusion_matrix),\
+                                    'train_ious': train_ious, 'train_dices': train_dices,\
+                                    'train_precision': t_precision, 'train_recall': t_recall,\
+                                    'train_specificity': t_specificity, 'train_sensitivity': t_sensitivity}, ignore_index=True)            
+
+            # Training stats reporting
+            print(f'\nTraining loss: {epoch_loss:.5f} ({self.config.loss}) ')
+            print('Classes:      [    BG         TCs        ARs   ]')
+            print('IoUs:        ', train_ious, ' | Mean: ', train_ious.mean())
+            print('Dice score:  ', train_dices, ' | Mean: ', train_dices.mean())            
+            print("Precision:   ", t_precision)
+            print("Recall:      ", t_recall)
+            print("Specificity: ", t_specificity)
+            print("Sensitivity: ", t_sensitivity)
+            print(np.array_str(np.around(training_confusion_matrix, decimals=3), precision=3))
+
+            # Compute and track validation history
+            val_loss, val_aggregate_cm, val_ious, val_dices = self.validate(val_dataset)
+
+            validation_confusion_matrix = 100*val_aggregate_cm/np.sum(val_aggregate_cm)
+            v_precision, v_recall, v_specificity, v_sensitivity = get_confusion_metrics(val_aggregate_cm)
+
+            history = history.append({'epoch_val_loss': val_loss, 'learning_rate': self.optimizer.param_groups[0]["lr"],\
+                                    'validation_confusion_matrix': np.array(validation_confusion_matrix),\
+                                    'val_ious': val_ious, 'val_dices': val_dices,\
+                                    'val_precision': v_precision, 'val_recall': v_recall,\
+                                    'val_specificity': v_specificity, 'val_sensitivity': v_sensitivity}, ignore_index=True)   
 
             # Validation stats reporting
-            val_loss, val_aggregate_cm, val_ious, val_dices = self.validate(val_dataset)
-            print(f'\nValidation loss: {val_loss.item():.5f} ({self.config.loss})')
-            print('Classes:   [    BG         TCs        ARs   ]')
-            print('IoUs:     ', val_ious, ' | Mean: ', val_ious.mean())
-            print('Dice:     ', val_dices, ' | Mean: ', val_dices.mean())
-            print(np.array_str(np.around(val_aggregate_cm/np.sum(val_aggregate_cm), decimals=3), precision=3))
+            print(f'\nValidation loss: {val_loss:.5f} ({self.config.loss})')
+            print('Classes:      [    BG         TCs        ARs   ]')
+            print('IoUs:        ', val_ious, ' | Mean: ', val_ious.mean())
+            print('Dice score:  ', val_dices, ' | Mean: ', val_dices.mean())
+            print("Precision:   ", v_precision)
+            print("Recall:      ", v_recall)
+            print("Specificity: ", t_specificity)
+            print("Sensitivity: ", t_sensitivity)
+            print(np.array_str(np.around(validation_confusion_matrix, decimals=3), precision=3))
             
             self.network.train()
 
-            # Decide if adapt learning rate
-            # TODO
+            # Update the learning rate if needed
+            self.scheduler.step(val_loss)
+
+            # Check for early termination
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                no_improvement_counter = 0
+            else:
+                best_val_loss *= 1 - 0.002
+                no_improvement_counter += 1
+
+            if no_improvement_counter >= 3:
+                break
 
             # Save model at each epoch if specified in config.json
             #if self.config.save_epochs : 
                 #self.save_model(self, self.config.model_path)
                 #print("Saving weights from epoch #", str(epoch), "\n")
+
+        # Return training history
+        return history
+        
 
     def predict(self, dataset: ClimateDataset, save_dir: str = None):
         '''Make predictions for the given dataset and return them as xr.DataArray'''
@@ -181,6 +247,8 @@ class CGNet():
 
         epoch_loader = tqdm(loader, leave=True)
         aggregate_cm = np.zeros((3,3))
+        num_minibatches = len(loader)
+        epoch_loss = 0.
 
         for features, labels in epoch_loader:
         
@@ -202,10 +270,13 @@ class CGNet():
             elif self.config.loss == "cross_entropy_loss_pytorch":
                 val_loss = cross_entropy_loss_pytorch(outputs, labels)
             elif self.config.loss == "weighted_cross_entropy":
-                val_loss = weighted_cross_entropy_loss(outputs, labels, self.config.weights)
+                val_loss = weighted_cross_entropy_loss(outputs, labels)
+
+            epoch_loss += val_loss.item()
 
         # Return validation stats:
-        return val_loss, aggregate_cm, get_iou_perClass(aggregate_cm), get_dice_perClass(aggregate_cm)
+        epoch_loss /= num_minibatches
+        return epoch_loss, aggregate_cm, get_iou_perClass(aggregate_cm), get_dice_perClass(aggregate_cm)
 
     def evaluate(self, dataset: ClimateDatasetLabeled):
         '''Evaluate on a dataset and return statistics'''
@@ -220,6 +291,8 @@ class CGNet():
 
         epoch_loader = tqdm(loader, leave=True)
         aggregate_cm = np.zeros((3,3))
+        epoch_loss = 0.
+        num_minibatches = len(loader)
 
         for features, labels in epoch_loader:
         
@@ -241,16 +314,39 @@ class CGNet():
             elif self.config.loss == "cross_entropy_loss_pytorch":
                 test_loss = cross_entropy_loss_pytorch(outputs, labels)
             elif self.config.loss == "weighted_cross_entropy":
-                test_loss = weighted_cross_entropy_loss(outputs, labels, self.config.weights)
+                test_loss = weighted_cross_entropy_loss(outputs, labels)
+
+            epoch_loss += test_loss.item()
+
+        # Compute and track evaluation stats
+        epoch_loss /= num_minibatches
+        test_confusion_matrix = 100*aggregate_cm/np.sum(aggregate_cm)
+        test_precision, test_recall, test_specificity, test_sensitivity = get_confusion_metrics(aggregate_cm)
+        test_ious = get_iou_perClass(aggregate_cm)
+        test_dices = get_dice_perClass(aggregate_cm)
+
+        history = pd.DataFrame.from_dict({'evaluation_loss': [epoch_loss],
+                                  'evaluation_confusion_matrix': [np.array(test_confusion_matrix)],
+                                  'test_ious': [test_ious],
+                                  'test_dices': [test_dices],
+                                  'test_precision': [test_precision],
+                                  'test_recall': [test_recall],
+                                  'test_specificity': [test_specificity],
+                                  'test_sensitivity': [test_sensitivity]})
 
         # Evaluation stats reporting:
-        print(f'\nTest loss: {test_loss.item():.5f} ({self.config.loss})')         
-        ious = get_iou_perClass(aggregate_cm)
-        print('Classes:   [   BG         TCs        ARs    ]')
-        print('IoUs:     ', ious, ' | Mean: ', ious.mean())
-        dices = get_dice_perClass(aggregate_cm)
-        print('Dice:     ', dices, ' | Mean: ', dices.mean())
-        print(np.array_str(np.around(aggregate_cm/np.sum(aggregate_cm), decimals=3), precision=3))
+        print(f'\nTest loss: {epoch_loss:.5f} ({self.config.loss})')         
+        print('Classes:      [    BG         TCs        ARs   ]')
+        print('IoUs:        ', test_ious, ' | Mean: ', test_ious.mean())
+        print('Dice score:  ', test_dices, ' | Mean: ', test_dices.mean())
+        print("Precision:   ", test_precision)
+        print("Recall:      ", test_recall)
+        print("Specificity: ", test_specificity)
+        print("Sensitivity: ", test_sensitivity)
+        print(np.array_str(np.around(test_confusion_matrix, decimals=3), precision=3))
+  
+        # Return evaluation metrics
+        return history
 
     def save_model(self, save_path: str):
         '''
