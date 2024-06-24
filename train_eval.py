@@ -19,21 +19,31 @@ data_path = args.data_path
 config = Config(model_path + 'config.json')
 cgnet = CGNet(config)
 
+inference_path = path.join(data_path, 'test')
+inference = ClimateDataset(inference_path, config)
+
 # Train model
 train = ClimateDatasetLabeled(path.join(data_path, 'train'), config)
 val = ClimateDatasetLabeled(path.join(data_path, 'val'), config)
 train_history = cgnet.train(train, val)
 
-# Evaluate model performance
+# use a saved model with
+cgnet.save_model(path.join('models', model_path))
+# use a saved model with
+# cgnet.load_model(model_path)
+
+
+# Evaluate performance
 test = ClimateDatasetLabeled(path.join(data_path, 'test'), config)
 test_history = cgnet.evaluate(test)
 
+class_masks = cgnet.predict(inference)  # masks with 1==TC, 2==AR
 
-class_masks = cgnet.predict(test) # masks with 1==TC, 2==AR
+# # Save model weights
 
-# Save model weights
+
 cgnet.save_model(model_path)
-
-# Save training history
+#
+# # Save training history
 history = pd.concat([train_history, test_history])
 history.to_csv(model_path + 'history.csv')

@@ -19,6 +19,11 @@ from climatenet.utils.utils import Config
 from os import path
 import pathlib
 
+# from netCDF4 import Dataset
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+# from tabulate import tabulate
+
 class CGNet():
     '''
     The high-level CGNet class.
@@ -62,7 +67,6 @@ class CGNet():
             raise ValueError('''You need to specify either a config or a model path.''')
 
         self.optimizer = Adam(self.network.parameters(), lr=self.config.lr)
-
         if self.config.scheduler:
             self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.1, patience=2, threshold=0.002, verbose=True)
 
@@ -117,6 +121,7 @@ class CGNet():
                 train_aggregate_cm += get_cm(predictions, labels, 3)
 
                 # Backward pass
+
                 train_loss = loss_function(outputs, labels, config_loss=self.config.loss)
                 epoch_loader.set_description(f'Loss: {train_loss.item():.5f} ({self.config.loss}) | LR: {self.optimizer.param_groups[0]["lr"]}')
 
@@ -195,6 +200,24 @@ class CGNet():
         # Return training history
         return history
 
+    #Chooses time stamps to generate a mapping of predictions.  Randomly
+    #defaults to 1, 4, 8 and 11
+    def map_channel(self, ds, metric, lon=-80, lat=35, timesteps=[1, 4, 8, 11]):
+        samp = ds.isel(time=timesteps)
+        p = samp.plot(
+            transform=ccrs.PlateCarree(),
+            col="time",
+            subplot_kws={"projection": ccrs.Orthographic(lon, lat)},
+            aspect=1.3, size=8
+        )
+
+        for ax in p.axes.flat:
+            ax.coastlines()
+            ax.gridlines()
+
+        plt.draw()
+        plt.show(block=True)
+        return
 
     def predict(self, dataset: ClimateDatasetLabeled, save_dir: str = None):
         '''Make predictions for the given dataset and return them as xr.DataArray'''
@@ -219,6 +242,8 @@ class CGNet():
             dims = [dim for dim in batch.dims if dim != "variable"]
 
             predictions.append(xr.DataArray(preds, coords=coords, dims=dims, attrs=batch.attrs))
+
+        self.map_channel(predictions, "LABELS")
 
         print(predictions)
         return xr.concat(predictions, dim='time')
